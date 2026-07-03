@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTC 실시간 차트</title>
+<meta name="description" content="BTCUSDT 선물 실시간 차트 — EMA·VWAP·RSI·펀딩비·박스권. 정보 제공용.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Pretendard Variable', Pretendard, -apple-system, sans-serif;
+    background: #fafafa; color: #222; display: flex; flex-direction: column;
+    word-break: keep-all;
+  }
+  header {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px; background: #fff; border-bottom: 1px solid #e5e7eb;
+  }
+  .sym { font-weight: 800; font-size: 17px; letter-spacing: -0.01em; }
+  .sym small { font-weight: 500; color: #6b7280; margin-left: 4px; }
+  .price { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .price.up { color: #d24f45; }
+  .price.down { color: #1f6fd2; }
+  .pill {
+    font-size: 12.5px; padding: 3px 9px; border-radius: 999px;
+    background: #f3f4f6; color: #374151; white-space: nowrap;
+  }
+  .pill.warm { background: #fdecea; color: #c0392b; }
+  .pill.cool { background: #e8f0fe; color: #1a56db; }
+  .pill.boxon { background: #f3e8ff; color: #7c3aed; font-weight: 600; }
+  .conn { font-size: 12px; margin-left: auto; white-space: nowrap; }
+  .conn.on { color: #16a34a; }
+  .conn.off { color: #d97706; }
+  .tf { display: flex; gap: 6px; }
+  .tf button {
+    font: inherit; font-size: 13px; font-weight: 600; padding: 5px 14px;
+    border: 1px solid #d1d5db; background: #fff; color: #374151;
+    border-radius: 8px; cursor: pointer;
+  }
+  .tf button.active { background: #111827; border-color: #111827; color: #fff; }
+  #wrap { flex: 1; position: relative; min-height: 0; }
+  #chart { position: absolute; inset: 0; }
+  #ohlc {
+    position: absolute; top: 8px; left: 12px; z-index: 5;
+    font-size: 12.5px; color: #374151; background: rgba(255,255,255,.85);
+    padding: 2px 8px; border-radius: 6px; font-variant-numeric: tabular-nums;
+    pointer-events: none;
+  }
+  #ohlc .up { color: #d24f45; } #ohlc .down { color: #1f6fd2; }
+  footer {
+    padding: 8px 14px; background: #fff; border-top: 1px solid #e5e7eb;
+    font-size: 12px; color: #6b7280; line-height: 1.7;
+  }
+  footer b { color: #374151; }
+  @media (max-width: 560px) {
+    .sym small { display: none; }
+    footer .full { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="sym">BTC<small>USDT · 바이낸스 선물</small></span>
+  <span id="price" class="price" aria-live="polite">—</span>
+  <span class="tf" role="group" aria-label="봉 주기 선택">
+    <button data-tf="1h" class="active" aria-pressed="true">1시간봉</button>
+    <button data-tf="15m" aria-pressed="false">15분봉</button>
+  </span>
+  <span id="rsi" class="pill">RSI —</span>
+  <span id="funding" class="pill">펀딩 —</span>
+  <span id="boxStatus" class="pill">불러오는 중…</span>
+  <span id="conn" class="conn off">○ 연결 중…</span>
+</header>
+<div id="wrap">
+  <div id="ohlc"></div>
+  <div id="chart"></div>
+</div>
+<footer>
+  <span class="full">
+    <b>선 안내</b> — 🟠주황 EMA20 · 🔵파랑 EMA50 · ⚪회색 EMA200(실선) · 💧청록 파선 VWAP(거래량 평균가) ·
+    📦박스권일 때 🟣보라 파선=박스 상·하단, 🟢상향·🔴하향 돌파선(점선) · 박스권 아닐 때 ⚫검정 파선=직전 스윙 고·저.
+    박스권 기준은 봇 알림과 동일한 검증 파라미터(1h 전용).<br>
+  </span>
+  캔들: 빨강=상승 · 파랑=하락 (한국식) · 시간축 = 한국시간(KST) · 정보 제공용이며 투자 권유가 아닙니다.
+</footer>
+<script src="vendor/lightweight-charts.standalone.production.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
