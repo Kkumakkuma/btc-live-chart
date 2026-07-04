@@ -313,17 +313,32 @@ function applyLatest(latest) {
   }
 }
 
+const IV_MS = { "1h": 3600_000, "15m": 900_000 };
+
 function startPolling(itv, myToken) {
   stopPolling();
+  let myTimer = null;   // 세대별 타이머 — stale 콜백이 새 폴링을 끄지 않게 (codex)
+  let inFlight = false; // 요청 겹침 방지 — 늦게 온 옛 응답이 최신 봉을 덮지 않게 (codex)
   const tick = async () => {
-    if (myToken !== seedToken) { stopPolling(); return; }
+    if (myToken !== seedToken) {
+      if (myTimer) clearInterval(myTimer);
+      return;
+    }
+    if (inFlight) return;
+    inFlight = true;
     try {
       const r = await fetch(`${REST}/fapi/v1/klines?symbol=${SYMBOL}&interval=${itv}&limit=2`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const rows = await r.json();
       if (myToken !== seedToken) return;
       if (Array.isArray(rows) && rows.length) {
-        applyLatest(rows.map(rowToBar));
+        const nb = rows.map(rowToBar);
+        const lastOur = bars.length ? bars[bars.length - 1].openMs : 0;
+        if (lastOur && nb[nb.length - 1].openMs - lastOur > (IV_MS[itv] || 0)) {
+          await reseed(myToken);   // 절전/네트워크 공백으로 봉을 건너뜀 → 전체 재시드 (codex)
+        } else {
+          applyLatest(nb);
+        }
         pollFail = 0;
         setConn("on");
       }
@@ -331,10 +346,13 @@ function startPolling(itv, myToken) {
       console.warn("[poll] 갱신 실패:", e);
       pollFail += 1;
       if (pollFail >= 3) setConn("off");  // 일시 오류는 조용히 재시도, 연속 실패만 표시
+    } finally {
+      inFlight = false;
     }
   };
   tick();
-  pollTimer = setInterval(tick, POLL_MS);
+  myTimer = setInterval(tick, POLL_MS);
+  pollTimer = myTimer;
 }
 
 function liveTouchIndicators(liveBar) {
