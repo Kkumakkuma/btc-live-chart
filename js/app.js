@@ -292,8 +292,9 @@ async function updateBias() {
       }
     }));
     const con = trendConsensus(results);
-    const emo = { "strong-long": "🟢🟢🟢", long: "🟢🟢", mixed: "⚪", short: "🔴🔴",
-                  "strong-short": "🔴🔴🔴", na: "⚪" }[con.key];
+    // 한국식 색: 롱=빨강, 숏=파랑 (차트 캔들과 동일 — 2026-07-04 쿠마님 지시)
+    const emo = { "strong-long": "🔴🔴🔴", long: "🔴🔴", mixed: "⚪", short: "🔵🔵",
+                  "strong-short": "🔵🔵🔵", na: "⚪" }[con.key];
     els.bias.textContent = `추세 ${emo} ${con.label}`;
     els.bias.className = "pill " + (con.key.includes("long") ? "warm"
       : con.key.includes("short") ? "cool" : "");
