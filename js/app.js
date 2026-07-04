@@ -8,7 +8,10 @@ import {
 
 const SYMBOL = "BTCUSDT";
 const REST = "https://fapi.binance.com";
-const WS = "wss://fstream.binance.com/ws";
+// 실시간 = REST 3초 폴링. 바이낸스 '선물' 웹소켓(fstream)은 한국 네트워크에서
+// 연결만 되고 데이터가 오지 않는 것을 실측(2026-07-04, kline/aggTrade/markPrice 전부 0건,
+// 스팟 WS는 정상) — 선물 데이터 일관성(봇 신호와 동일 소스) 유지를 위해 REST 폴링 채택.
+const POLL_MS = 3000;
 const SEED_LIMIT = 1000;
 const KST_OFFSET = 9 * 3600; // Lightweight Charts는 UTC 기준 표시 → KST로 밀어서 표기
 
@@ -35,8 +38,8 @@ const els = {
 
 let interval = "1h";
 let bars = [];          // {time(KST-shift sec), openMs, open, high, low, close, volume}
-let ws = null;
-let wsRetry = 0;
+let pollTimer = null;
+let pollFail = 0;
 let priceLines = [];
 let lastPrice = null;
 let seedToken = 0;      // TF 전환/재시드 경합 방지
@@ -260,67 +263,78 @@ function setPrice(p, prev) {
   }
 }
 
-// ── 실시간 (WebSocket kline) ─────────────────────────────────
+// ── 실시간 (REST 3초 폴링) ───────────────────────────────────
 function setConn(state) {
-  els.conn.textContent = state === "on" ? "● 실시간" : "○ 재연결 중…";
+  els.conn.textContent = state === "on" ? "● 실시간" : "○ 연결 재시도 중…";
   els.conn.className = "conn " + (state === "on" ? "on" : "off");
 }
 
-function openWs(itv, myToken) {
-  if (myToken !== seedToken) return;  // stale 흐름이 현재 소켓을 닫지 못하게 (codex High)
-  if (ws) { try { ws.onclose = null; ws.close(); } catch { /* noop */ } }
-  ws = new WebSocket(`${WS}/${SYMBOL.toLowerCase()}@kline_${itv}`);
-  const mySocket = ws;
-  ws.onopen = () => {
-    if (myToken !== seedToken || ws !== mySocket) { try { mySocket.close(); } catch { /* noop */ } return; }
-    wsRetry = 0; setConn("on");
-  };
-  ws.onmessage = (ev) => {
-    if (myToken !== seedToken) return;
-    const k = JSON.parse(ev.data).k;
-    if (!k) return;
-    const bar = {
-      openMs: k.t,
-      time: Math.floor(k.t / 1000) + KST_OFFSET,
-      open: +k.o, high: +k.h, low: +k.l, close: +k.c, volume: +k.v,
-    };
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+}
+
+function applyLatest(latest) {
+  // latest = 최근 2봉 [직전 마감봉, 진행봉]. 봉 전환 감지 시 시리즈 전체 동기화+마감 재계산.
+  let closedNew = false;
+  for (const bar of latest) {
     const lastIdx = bars.length - 1;
-    const prevClose = lastIdx > 0 ? bars[lastIdx - 1].close : null;
     if (bars.length && bar.openMs === bars[lastIdx].openMs) {
-      bars[lastIdx] = bar;               // 진행봉 갱신
+      bars[lastIdx] = bar;               // 진행봉(또는 방금 확정된 마지막 봉) 갱신
+      candles.update({ time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
+      volSeries.update({ time: bar.time, value: bar.volume,
+                         color: bar.close >= bar.open ? C.up + "99" : C.down + "99" });
     } else if (!bars.length || bar.openMs > bars[lastIdx].openMs) {
-      bars.push(bar);                    // 새 봉 시작
+      bars.push(bar);                    // 새 봉 시작 (직전 봉은 위 분기에서 최종치 반영됨)
       bars = bars.slice(-SEED_LIMIT);
+      closedNew = true;
     } else {
-      return;                            // 과거 메시지 무시
+      // latest[0]이 이미 지난 봉인 경우 — 데이터만 갱신.
+      // (Lightweight Charts의 series.update는 마지막 봉보다 오래된 시각이면 예외 —
+      //  시각 반영은 다음 봉 전환 시 setData 동기화로 충분)
+      const i = bars.length - 2;
+      if (i >= 0 && bars[i].openMs === bar.openMs) {
+        bars[i] = bar;
+      }
     }
-    candles.update({ time: bar.time, open: bar.open, high: bar.high, low: bar.low, close: bar.close });
-    volSeries.update({ time: bar.time, value: bar.volume,
-                       color: bar.close >= bar.open ? C.up + "99" : C.down + "99" });
-    setPrice(bar.close, prevClose);
-    // 진행봉 지표 라이브 갱신(마지막 점만) — EMA 점화식/VWAP 창 재계산
-    liveTouchIndicators(bar);
-    if (k.x) {
-      // 봉 마감 → 전체 재계산(박스/RSI 포함) + 시리즈를 bars와 정확히 동기화
-      // (update만 하면 잘려나간 과거 포인트가 시리즈에 계속 쌓임 — codex Low)
-      candles.setData(bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
-      volSeries.setData(bars.map((b) => ({ time: b.time, value: b.volume,
-        color: b.close >= b.open ? C.up + "99" : C.down + "99" })));
-      recomputeAll(true);  // 이 시점 마지막 봉 = 방금 마감된 봉 (codex High)
-    }
-  };
-  ws.onclose = () => {
-    if (myToken !== seedToken) return;
-    setConn("off");
-    const delay = Math.min(15000, 1000 * 2 ** wsRetry++);
-    setTimeout(async () => {
+  }
+  const last = bars[bars.length - 1];
+  setPrice(last.close, bars.length > 1 ? bars[bars.length - 2].close : null);
+  if (closedNew) {
+    // 봉 전환 → 시리즈를 bars와 정확히 동기화(잘린 과거 포인트 정리) + 마감 지표 재계산
+    candles.setData(bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
+    volSeries.setData(bars.map((b) => ({ time: b.time, value: b.volume,
+      color: b.close >= b.open ? C.up + "99" : C.down + "99" })));
+    recomputeAll();   // 새 진행봉이 이미 존재 → 기본 경로(마지막 봉 제외)가 정확
+  } else {
+    liveTouchIndicators(last);
+  }
+}
+
+function startPolling(itv, myToken) {
+  stopPolling();
+  const tick = async () => {
+    if (myToken !== seedToken) { stopPolling(); return; }
+    try {
+      const r = await fetch(`${REST}/fapi/v1/klines?symbol=${SYMBOL}&interval=${itv}&limit=2`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const rows = await r.json();
       if (myToken !== seedToken) return;
-      try { await reseed(myToken); } catch { /* 다음 재시도 */ }
-      if (myToken !== seedToken) return;  // await 사이 TF 전환됐으면 중단 (codex High)
-      openWs(itv, myToken);
-    }, delay);
+      if (Array.isArray(rows) && rows.length) {
+        applyLatest(rows.map(rowToBar));
+        pollFail = 0;
+        setConn("on");
+      }
+    } catch (e) {
+      console.warn("[poll] 갱신 실패:", e);
+      pollFail += 1;
+      if (pollFail >= 3) setConn("off");  // 일시 오류는 조용히 재시도, 연속 실패만 표시
+    }
   };
-  ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
+  tick();
+  pollTimer = setInterval(tick, POLL_MS);
 }
 
 function liveTouchIndicators(liveBar) {
@@ -377,7 +391,7 @@ async function switchTf(itv) {
     setTimeout(() => { if (myToken === seedToken) switchTf(itv); }, 5000);
     return;
   }
-  openWs(itv, myToken);
+  startPolling(itv, myToken);
 }
 
 // ── 크로스헤어 OHLC 레전드 ───────────────────────────────────
