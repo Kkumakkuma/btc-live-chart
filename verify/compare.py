@@ -96,6 +96,20 @@ sw_lo = float(plot_df["Low"].iloc[-21:-1].min())
 check("swing.hi", js["swing"]["swingHi"], sw_hi, tol=1e-12)
 check("swing.lo", js["swing"]["swingLo"], sw_lo, tol=1e-12)
 
+# 신호 스윕 = 백테스트 find_signals(winner) 완전 일치 (마커 기능)
+import numpy as np  # noqa: E402
+import box_breakout_trade_backtest as bt  # noqa: E402
+_h = df["high"].to_numpy(); _l = df["low"].to_numpy()
+_c = df["close"].to_numpy(); _v = df["volume"].to_numpy()
+pysigs = bt.find_signals(_h, _l, _c, _v, bt.calc_atr(_h, _l, _c, 14),
+                         bt.calc_ema(_c, 20), bt.calc_ema(_c, 50),
+                         24, 2.5, 1.5, 1.0, 1, True)
+pysigs = [[int(i), int(d)] for i, d in pysigs]
+if js["signals"] != pysigs:
+    fails.append(f"signals 불일치: js={js['signals']} py={pysigs}")
+else:
+    print(f"  signals(find_signals winner): OK ({len(pysigs)}건 완전 일치 — {pysigs})")
+
 if fails:
     print("\n❌ 불일치:")
     for x in fails:

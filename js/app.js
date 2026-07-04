@@ -2,7 +2,8 @@
 // 봇(1h 알림 PNG)과 같은 정보 구성: 한국식 캔들 + EMA20/50/200 + VWAP24 + 거래량
 // + RSI(마감봉) + 펀딩비 + 박스권(1h winner)/스윙 고저선. 시간축 = KST.
 import {
-  ema, rsi, vwapRolling, computeBoxOverlay, computeSwing, BOX_PARAMS,
+  ema, rsi, vwapRolling, computeBoxOverlay, computeSwing,
+  calcAtrArray, findBoxSignals, BOX_SL_TP_K,
 } from "./indicators.js";
 
 const SYMBOL = "BTCUSDT";
@@ -23,6 +24,7 @@ const C = {
 const els = {
   price: document.getElementById("price"),
   rsi: document.getElementById("rsi"),
+  atr: document.getElementById("atr"),
   funding: document.getElementById("funding"),
   box: document.getElementById("boxStatus"),
   conn: document.getElementById("conn"),
@@ -91,14 +93,30 @@ async function fetchSeed(itv) {
   return (await r.json()).map(rowToBar);
 }
 
+let fundingState = null; // {rate(%), nextMs}
+
+function renderFunding() {
+  if (!fundingState) return;
+  const { rate, nextMs } = fundingState;
+  let cd = "";
+  const remain = nextMs - Date.now();
+  if (remain > 0) {
+    const h = Math.floor(remain / 3600000);
+    const m = Math.floor((remain % 3600000) / 60000);
+    cd = ` · 정산 ${h > 0 ? h + "시간 " : ""}${m}분 후`;
+  }
+  els.funding.textContent = `펀딩 ${rate >= 0 ? "+" : ""}${rate.toFixed(3)}%${cd}`;
+  els.funding.className = "pill " + (rate >= 0 ? "warm" : "cool");
+}
+
 async function fetchFunding() {
   try {
-    const r = await fetch(`${REST}/fapi/v1/fundingRate?symbol=${SYMBOL}&limit=1`);
+    // premiumIndex = 최근 펀딩비 + 다음 정산 시각 (공개, CORS 허용 실측)
+    const r = await fetch(`${REST}/fapi/v1/premiumIndex?symbol=${SYMBOL}`);
     const d = await r.json();
-    if (Array.isArray(d) && d.length) {
-      const v = parseFloat(d[d.length - 1].fundingRate) * 100;
-      els.funding.textContent = `펀딩 ${v >= 0 ? "+" : ""}${v.toFixed(3)}%/8h`;
-      els.funding.className = "pill " + (v >= 0 ? "warm" : "cool");
+    if (d && d.lastFundingRate !== undefined) {
+      fundingState = { rate: parseFloat(d.lastFundingRate) * 100, nextMs: +d.nextFundingTime };
+      renderFunding();
     }
   } catch { /* 표시만 생략 */ }
 }
@@ -114,7 +132,9 @@ function seriesData(values) {
   return out;
 }
 
-function recomputeAll() {
+function recomputeAll(allClosed = false) {
+  // allClosed=true: 봉마감 직후(새 진행봉 도착 전) — 마지막 봉도 마감봉으로 취급.
+  // 기본(false): REST 시드/평시 — 마지막 봉은 진행 중이라 마감 지표에서 제외 (codex High 반영)
   const closes = bars.map((b) => b.close);
   const highs = bars.map((b) => b.high);
   const lows = bars.map((b) => b.low);
@@ -126,17 +146,43 @@ function recomputeAll() {
   }
   vwapS.setData(seriesData(vwapRolling(highs, lows, closes, vols, 24)));
 
-  // RSI = 마지막 '마감봉' (진행봉 제외) — PNG 제목과 동일 기준
-  const rs = rsi(closes.slice(0, -1), 14);
+  // RSI = 마지막 '마감봉' — PNG 제목과 동일 기준
+  const closed = allClosed ? bars : bars.slice(0, -1);
+  const rs = rsi(closed.map((b) => b.close), 14);
   const rv = rs[rs.length - 1];
   if (rv !== null && rv !== undefined) {
     els.rsi.textContent = `RSI ${Math.round(rv)}`;
     els.rsi.className = "pill " + (rv >= 70 ? "warm" : rv <= 30 ? "cool" : "");
   }
-  updateOverlayLines();
+
+  // ATR(마감봉, Wilder 14 — 봇과 동일). 1h에선 winner 청산폭(±3ATR)도 같이 안내.
+  const atrArr = calcAtrArray(closed.map((b) => b.high), closed.map((b) => b.low),
+                              closed.map((b) => b.close), 14);
+  const av = atrArr[atrArr.length - 1];
+  if (av) {
+    const w = Math.round(av * BOX_SL_TP_K);
+    els.atr.textContent = interval === "1h"
+      ? `ATR $${Math.round(av).toLocaleString()} · 손절/익절폭 ±$${w.toLocaleString()}(3ATR)`
+      : `ATR $${Math.round(av).toLocaleString()}`;
+  }
+
+  // 봇 winner 신호 마커 (1h 전용 — 15m은 검증 전략 없음)
+  const sigs = findBoxSignals(closed, interval);
+  candles.setMarkers(sigs.map((s) => ({
+    time: closed[s.idx].time,
+    position: s.dir === 1 ? "belowBar" : "aboveBar",
+    color: s.dir === 1 ? C.upTrig : C.dnTrig,
+    shape: s.dir === 1 ? "arrowUp" : "arrowDown",
+    text: s.dir === 1 ? "매수" : "매도",
+  })));
+
+  // 박스/스윙 계산 함수는 '마지막 원소=진행봉' 전제(파이썬 원본과 동일 검증됨).
+  // 봉마감 직후엔 마지막 마감봉을 복제해 붙여 같은 전제를 유지한다 — 복제 원소는
+  // last(m-2) 인덱스 계산 밖이라 수치에 영향 없음.
+  updateOverlayLines(allClosed ? [...bars, bars[bars.length - 1]] : bars);
 }
 
-function updateOverlayLines() {
+function updateOverlayLines(overlayBars) {
   for (const pl of priceLines) candles.removePriceLine(pl);
   priceLines = [];
   const add = (price, color, style, width, title) => {
@@ -146,7 +192,7 @@ function updateOverlayLines() {
     }));
   };
   const LS = LightweightCharts.LineStyle;
-  const box = computeBoxOverlay(bars, interval);
+  const box = computeBoxOverlay(overlayBars, interval);
   if (box) {
     add(box.boxHi, C.box, LS.Dashed, 1, "박스 상단");
     add(box.boxLo, C.box, LS.Dashed, 1, "박스 하단");
@@ -155,7 +201,7 @@ function updateOverlayLines() {
     els.box.textContent = `📦 박스권 형성 중 · 폭 ${box.rangePct.toFixed(2)}% · 박스 내 위치 ${Math.round(box.posPct)}%`;
     els.box.className = "pill boxon";
   } else {
-    const sw = computeSwing(bars, 20);
+    const sw = computeSwing(overlayBars, 20);
     if (sw) {
       add(sw.swingHi, C.swing, LS.Dashed, 1, "스윙 고점");
       add(sw.swingLo, C.swing, LS.Dashed, 1, "스윙 저점");
@@ -221,7 +267,7 @@ function openWs(itv, myToken) {
       candles.setData(bars.map((b) => ({ time: b.time, open: b.open, high: b.high, low: b.low, close: b.close })));
       volSeries.setData(bars.map((b) => ({ time: b.time, value: b.volume,
         color: b.close >= b.open ? C.up + "99" : C.down + "99" })));
-      recomputeAll();
+      recomputeAll(true);  // 이 시점 마지막 봉 = 방금 마감된 봉 (codex High)
     }
   };
   ws.onclose = () => {
@@ -287,6 +333,7 @@ async function switchTf(itv) {
     chart.timeScale().scrollToRealTime();
   } catch (e) {
     if (myToken !== seedToken) return;
+    candles.setMarkers([]);  // 시드 실패 시 이전 TF 마커 잔존 방지 (codex Low)
     els.box.textContent = "데이터 로딩 실패 — 잠시 후 자동 재시도";
     setTimeout(() => { if (myToken === seedToken) switchTf(itv); }, 5000);
     return;
@@ -322,3 +369,4 @@ document.addEventListener("visibilitychange", () => {
 switchTf("1h");
 fetchFunding();
 setInterval(fetchFunding, 5 * 60 * 1000);
+setInterval(renderFunding, 30 * 1000);  // 카운트다운 표시 갱신(재조회 없음)

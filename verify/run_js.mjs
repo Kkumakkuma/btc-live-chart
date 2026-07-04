@@ -2,7 +2,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { ema, rsi, vwapRolling, wilderAtrAt, computeBoxOverlay, computeSwing } from "../js/indicators.js";
+import {
+  ema, rsi, vwapRolling, wilderAtrAt, computeBoxOverlay, computeSwing, findBoxSignals,
+} from "../js/indicators.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const rows = JSON.parse(readFileSync(join(here, "fixture_1h.json"), "utf-8"));
@@ -23,5 +25,6 @@ const out = {
   atr_last_closed: wilderAtrAt(highs, lows, closes, m - 2, 14),
   box: computeBoxOverlay(bars, "1h"),
   swing: computeSwing(bars, 20),
+  signals: findBoxSignals(bars, "1h").map((s) => [s.idx, s.dir]),
 };
 console.log(JSON.stringify(out));
