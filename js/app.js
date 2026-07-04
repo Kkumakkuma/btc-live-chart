@@ -20,7 +20,8 @@ const C = {
   up: "#d24f45", down: "#1f6fd2",
   ema20: "#f59e0b", ema50: "#2563eb", ema200: "#6b7280",
   vwap: "#0891b2",
-  box: "#9333ea", upTrig: "#16a34a", dnTrig: "#dc2626",
+  // 한국식 통일(2026-07-04 쿠마님 지시): 매수/상향=빨강, 매도/하향=파랑 (캔들과 동일)
+  box: "#9333ea", upTrig: "#d24f45", dnTrig: "#1f6fd2",
   swing: "#111827",
 };
 
