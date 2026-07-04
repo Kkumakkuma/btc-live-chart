@@ -166,20 +166,59 @@ function recomputeAll(allClosed = false) {
       : `ATR $${Math.round(av).toLocaleString()}`;
   }
 
-  // 봇 winner 신호 마커 (1h 전용 — 15m은 검증 전략 없음)
-  const sigs = findBoxSignals(closed, interval);
-  candles.setMarkers(sigs.map((s) => ({
-    time: closed[s.idx].time,
-    position: s.dir === 1 ? "belowBar" : "aboveBar",
-    color: s.dir === 1 ? C.upTrig : C.dnTrig,
-    shape: s.dir === 1 ? "arrowUp" : "arrowDown",
-    text: s.dir === 1 ? "매수" : "매도",
-  })));
+  // 봇 winner 신호 마커. 15m 자체 신호는 백테스트 검증 실패(2026-07-04, 3,456조합
+  // 게이트 통과 0 · 최고 조합도 OOS 음수)라 만들지 않는다 — 대신 검증된 1h 신호를
+  // 15m 화면의 같은 시각에 표시(비동기, update15mMarkers).
+  if (interval === "1h") {
+    const sigs = findBoxSignals(closed, interval);
+    candles.setMarkers(sigs.map((s) => ({
+      time: closed[s.idx].time,
+      position: s.dir === 1 ? "belowBar" : "aboveBar",
+      color: s.dir === 1 ? C.upTrig : C.dnTrig,
+      shape: s.dir === 1 ? "arrowUp" : "arrowDown",
+      text: s.dir === 1 ? "매수" : "매도",
+    })));
+  } else {
+    candles.setMarkers([]);  // 1h 마커 잔존 방지 — 비동기 갱신 전 즉시 비움 (codex)
+    update15mMarkers(seedToken);
+  }
 
   // 박스/스윙 계산 함수는 '마지막 원소=진행봉' 전제(파이썬 원본과 동일 검증됨).
   // 봉마감 직후엔 마지막 마감봉을 복제해 붙여 같은 전제를 유지한다 — 복제 원소는
   // last(m-2) 인덱스 계산 밖이라 수치에 영향 없음.
   updateOverlayLines(allClosed ? [...bars, bars[bars.length - 1]] : bars);
+}
+
+let markerSeq = 0;  // 같은 토큰 내 마커 요청 순서 보장 (늦게 온 옛 응답이 최신을 덮지 않게 — codex)
+
+async function update15mMarkers(myToken) {
+  // 15m 화면 화살표 = 1h winner 신호를 그 신호가 확정된 15분봉(해당 1h봉의 마지막 15m봉)에 표시.
+  if (interval !== "15m") return;
+  const mySeq = ++markerSeq;
+  try {
+    const r = await fetch(`${REST}/fapi/v1/klines?symbol=${SYMBOL}&interval=1h&limit=1000`);
+    if (!r.ok) return;
+    const kl = await r.json();
+    if (myToken !== seedToken || interval !== "15m" || mySeq !== markerSeq) return;
+    const closed1h = kl.slice(0, -1).map((k) => ({
+      openMs: k[0], high: +k[2], low: +k[3], close: +k[4], volume: +k[5],
+    }));
+    const sigs = findBoxSignals(closed1h, "1h");
+    const known = new Set(bars.map((b) => b.openMs));
+    const markers = [];
+    for (const s of sigs) {
+      const t15 = closed1h[s.idx].openMs + 45 * 60000; // 1h 신호봉의 마지막 15m봉 open
+      if (!known.has(t15)) continue; // 로드된 15m 범위(약 10일) 밖은 생략
+      markers.push({
+        time: t15 / 1000 + KST_OFFSET,
+        position: s.dir === 1 ? "belowBar" : "aboveBar",
+        color: s.dir === 1 ? C.upTrig : C.dnTrig,
+        shape: s.dir === 1 ? "arrowUp" : "arrowDown",
+        text: s.dir === 1 ? "1h 매수" : "1h 매도",
+      });
+    }
+    candles.setMarkers(markers);
+  } catch { /* 마커만 생략 */ }
 }
 
 function updateOverlayLines(overlayBars) {
