@@ -266,11 +266,10 @@ function updateOverlayLines(overlayBars) {
       : "15분봉은 박스 없음(1h 전용) — 스윙 고·저 표시";
     els.box.className = "pill";
   }
-  // 내 포지션 라인(수동 입력) — 봇 알림 차트와 동일한 색/쇄선 (가격 레벨이라 TF 무관 표시)
+  // 내 포지션 진입가 라인(수동 입력). 손절/익절 참고선은 2026-07-04 쿠마님 지시로 제거 —
+  // 증거금·레버리지를 모르는 상태의 ±3ATR 선은 오해 소지. 손익률은 상단 필로만.
   if (myPos && myPos.entry > 0) {
     add(myPos.entry, "#111827", LS.SparseDotted, 2, "내 진입가");
-    if (myPos.sl > 0) add(myPos.sl, "#1f6fd2", LS.SparseDotted, 2, "손절(참고)");
-    if (myPos.tp > 0) add(myPos.tp, "#d24f45", LS.SparseDotted, 2, "익절(참고)");
   }
 }
 
@@ -291,21 +290,6 @@ function renderPosPill() {
   }
   els.posPill.textContent = `내 포지션 ${dirTxt} $${myPos.entry.toLocaleString("en-US", { maximumFractionDigits: 1 })}${pnlTxt}`;
   els.posPill.hidden = false;
-}
-
-async function fetch1hAtr() {
-  // 손절/익절 폭 기준 = 봇과 동일한 1h ATR×3. 15m 화면에서 입력해도 1h ATR을 쓴다.
-  if (interval === "1h" && bars.length > 20) {
-    const closed = bars.slice(0, -1);
-    const arr = calcAtrArray(closed.map((b) => b.high), closed.map((b) => b.low),
-                             closed.map((b) => b.close), 14);
-    return arr[arr.length - 1] || null;
-  }
-  const r = await fetch(`${REST}/fapi/v1/klines?symbol=${SYMBOL}&interval=1h&limit=100`);
-  if (!r.ok) return null;
-  const kl = (await r.json()).slice(0, -1);
-  const arr = calcAtrArray(kl.map((k) => +k[2]), kl.map((k) => +k[3]), kl.map((k) => +k[4]), 14);
-  return arr[arr.length - 1] || null;
 }
 
 function savePosState() {
@@ -330,26 +314,13 @@ function initPosUi() {
     if (open && myPos) els.posEntry.value = myPos.entry;
   });
   els.dirBtns.forEach((b) => b.addEventListener("click", () => { dir = b.dataset.dir; syncDirBtns(); }));
-  let saveSeq = 0;  // ATR fetch 대기 중 '지우기'를 눌렀으면 그 뒤 저장 완료를 무효화 (codex)
-  els.posSave.addEventListener("click", async () => {
+  els.posSave.addEventListener("click", () => {
     const entry = parseFloat(els.posEntry.value);
     if (!(entry > 0)) {
       els.posEntry.focus();
       return;
     }
-    const mySeq = ++saveSeq;
-    els.posSave.disabled = true;
-    let atr = null;
-    try { atr = await fetch1hAtr(); } catch { /* 라인은 진입가만이라도 표시 */ }
-    els.posSave.disabled = false;
-    if (mySeq !== saveSeq) return;
-    const k = atr ? BOX_SL_TP_K * atr : 0;
-    myPos = {
-      dir,
-      entry,
-      sl: k ? (dir === "short" ? entry + k : entry - k) : 0,
-      tp: k ? (dir === "short" ? entry - k : entry + k) : 0,
-    };
+    myPos = { dir, entry };
     savePosState();
     updateOverlayLines(bars);
     renderPosPill();
@@ -357,7 +328,6 @@ function initPosUi() {
     els.posBtn.setAttribute("aria-expanded", "false");
   });
   els.posClear.addEventListener("click", () => {
-    saveSeq += 1;   // 진행 중이던 저장 무효화
     myPos = null;
     savePosState();
     updateOverlayLines(bars);
