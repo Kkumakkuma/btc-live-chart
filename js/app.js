@@ -28,6 +28,13 @@ const els = {
   price: document.getElementById("price"),
   rsi: document.getElementById("rsi"),
   atr: document.getElementById("atr"),
+  posBtn: document.getElementById("posBtn"),
+  posPill: document.getElementById("posPill"),
+  posPanel: document.getElementById("posPanel"),
+  posEntry: document.getElementById("posEntry"),
+  posSave: document.getElementById("posSave"),
+  posClear: document.getElementById("posClear"),
+  dirBtns: Array.from(document.querySelectorAll(".dirbtn")),
   funding: document.getElementById("funding"),
   box: document.getElementById("boxStatus"),
   conn: document.getElementById("conn"),
@@ -38,6 +45,12 @@ const els = {
 
 let interval = "1h";
 let bars = [];          // {time(KST-shift sec), openMs, open, high, low, close, volume}
+const POS_KEY = "btclc_pos";
+let myPos = null;       // {dir:"long"|"short", entry, sl, tp} — 이 브라우저(localStorage)에만 저장
+try {
+  const raw = localStorage.getItem(POS_KEY);
+  if (raw) myPos = JSON.parse(raw);
+} catch { /* 손상 데이터 무시 */ }
 let pollTimer = null;
 let pollFail = 0;
 let priceLines = [];
@@ -253,6 +266,105 @@ function updateOverlayLines(overlayBars) {
       : "15분봉은 박스 없음(1h 전용) — 스윙 고·저 표시";
     els.box.className = "pill";
   }
+  // 내 포지션 라인(수동 입력) — 봇 알림 차트와 동일한 색/쇄선 (가격 레벨이라 TF 무관 표시)
+  if (myPos && myPos.entry > 0) {
+    add(myPos.entry, "#111827", LS.SparseDotted, 2, "내 진입가");
+    if (myPos.sl > 0) add(myPos.sl, "#1f6fd2", LS.SparseDotted, 2, "손절(참고)");
+    if (myPos.tp > 0) add(myPos.tp, "#d24f45", LS.SparseDotted, 2, "익절(참고)");
+  }
+}
+
+// ── 내 포지션 (수동 입력 — localStorage, 서버 전송 없음) ──────
+function renderPosPill() {
+  if (!myPos || !(myPos.entry > 0)) {
+    els.posPill.hidden = true;
+    return;
+  }
+  const dirTxt = myPos.dir === "short" ? "숏" : "롱";
+  let pnlTxt = "";
+  if (lastPrice) {
+    const pnl = ((lastPrice - myPos.entry) / myPos.entry) * 100 * (myPos.dir === "short" ? -1 : 1);
+    pnlTxt = ` · ${pnl >= 0 ? "+" : ""}${pnl.toFixed(2)}%`;
+    els.posPill.className = "pill " + (pnl >= 0 ? "warm" : "cool");
+  } else {
+    els.posPill.className = "pill";
+  }
+  els.posPill.textContent = `내 포지션 ${dirTxt} $${myPos.entry.toLocaleString("en-US", { maximumFractionDigits: 1 })}${pnlTxt}`;
+  els.posPill.hidden = false;
+}
+
+async function fetch1hAtr() {
+  // 손절/익절 폭 기준 = 봇과 동일한 1h ATR×3. 15m 화면에서 입력해도 1h ATR을 쓴다.
+  if (interval === "1h" && bars.length > 20) {
+    const closed = bars.slice(0, -1);
+    const arr = calcAtrArray(closed.map((b) => b.high), closed.map((b) => b.low),
+                             closed.map((b) => b.close), 14);
+    return arr[arr.length - 1] || null;
+  }
+  const r = await fetch(`${REST}/fapi/v1/klines?symbol=${SYMBOL}&interval=1h&limit=100`);
+  if (!r.ok) return null;
+  const kl = (await r.json()).slice(0, -1);
+  const arr = calcAtrArray(kl.map((k) => +k[2]), kl.map((k) => +k[3]), kl.map((k) => +k[4]), 14);
+  return arr[arr.length - 1] || null;
+}
+
+function savePosState() {
+  try {
+    if (myPos) localStorage.setItem(POS_KEY, JSON.stringify(myPos));
+    else localStorage.removeItem(POS_KEY);
+  } catch { /* 프라이빗 모드 등 — 표시 자체는 동작 */ }
+}
+
+function initPosUi() {
+  let dir = (myPos && myPos.dir) || "long";
+  const syncDirBtns = () => els.dirBtns.forEach((b) => {
+    const on = b.dataset.dir === dir;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  syncDirBtns();
+  els.posBtn.addEventListener("click", () => {
+    const open = els.posPanel.hidden;
+    els.posPanel.hidden = !open;
+    els.posBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open && myPos) els.posEntry.value = myPos.entry;
+  });
+  els.dirBtns.forEach((b) => b.addEventListener("click", () => { dir = b.dataset.dir; syncDirBtns(); }));
+  let saveSeq = 0;  // ATR fetch 대기 중 '지우기'를 눌렀으면 그 뒤 저장 완료를 무효화 (codex)
+  els.posSave.addEventListener("click", async () => {
+    const entry = parseFloat(els.posEntry.value);
+    if (!(entry > 0)) {
+      els.posEntry.focus();
+      return;
+    }
+    const mySeq = ++saveSeq;
+    els.posSave.disabled = true;
+    let atr = null;
+    try { atr = await fetch1hAtr(); } catch { /* 라인은 진입가만이라도 표시 */ }
+    els.posSave.disabled = false;
+    if (mySeq !== saveSeq) return;
+    const k = atr ? BOX_SL_TP_K * atr : 0;
+    myPos = {
+      dir,
+      entry,
+      sl: k ? (dir === "short" ? entry + k : entry - k) : 0,
+      tp: k ? (dir === "short" ? entry - k : entry + k) : 0,
+    };
+    savePosState();
+    updateOverlayLines(bars);
+    renderPosPill();
+    els.posPanel.hidden = true;
+    els.posBtn.setAttribute("aria-expanded", "false");
+  });
+  els.posClear.addEventListener("click", () => {
+    saveSeq += 1;   // 진행 중이던 저장 무효화
+    myPos = null;
+    savePosState();
+    updateOverlayLines(bars);
+    renderPosPill();
+    els.posPanel.hidden = true;
+    els.posBtn.setAttribute("aria-expanded", "false");
+  });
 }
 
 function setPrice(p, prev) {
@@ -261,6 +373,7 @@ function setPrice(p, prev) {
   if (prev !== null && prev !== undefined) {
     els.price.className = "price " + (p >= prev ? "up" : "down");
   }
+  renderPosPill();
 }
 
 // ── 실시간 (REST 3초 폴링) ───────────────────────────────────
@@ -437,6 +550,8 @@ document.addEventListener("visibilitychange", () => {
     switchTf(interval);
   }
 });
+initPosUi();
+renderPosPill();
 switchTf("1h");
 fetchFunding();
 setInterval(fetchFunding, 5 * 60 * 1000);

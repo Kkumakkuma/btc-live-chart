@@ -31,6 +31,38 @@
   .pill.warm { background: #fdecea; color: #c0392b; }
   .pill.cool { background: #e8f0fe; color: #1a56db; }
   .pill.boxon { background: #f3e8ff; color: #7c3aed; font-weight: 600; }
+  .posbtn {
+    font: inherit; font-size: 12.5px; font-weight: 600; padding: 4px 10px;
+    border: 1px dashed #9ca3af; background: #fff; color: #374151;
+    border-radius: 999px; cursor: pointer;
+  }
+  .posbtn[aria-expanded="true"] { background: #111827; color: #fff; border-style: solid; }
+  .pospanel {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 14px; background: #fffbeb; border-bottom: 1px solid #fde68a;
+    font-size: 13px;
+  }
+  .pospanel[hidden] { display: none; }  /* display:flex가 hidden 속성을 이기지 않게 */
+  .dirgroup { display: flex; }
+  .dirbtn {
+    font: inherit; font-size: 13px; font-weight: 700; padding: 5px 14px; cursor: pointer;
+    border: 1px solid #d1d5db; background: #fff; color: #6b7280;
+  }
+  .dirbtn:first-child { border-radius: 8px 0 0 8px; }
+  .dirbtn:last-child { border-radius: 0 8px 8px 0; border-left: none; }
+  .dirbtn.active[data-dir="long"] { background: #d24f45; border-color: #d24f45; color: #fff; }
+  .dirbtn.active[data-dir="short"] { background: #1f6fd2; border-color: #1f6fd2; color: #fff; }
+  #posEntry {
+    font: inherit; font-size: 13px; padding: 5px 10px; width: 150px;
+    border: 1px solid #d1d5db; border-radius: 8px;
+  }
+  .posact {
+    font: inherit; font-size: 13px; font-weight: 600; padding: 5px 12px;
+    border-radius: 8px; cursor: pointer; border: 1px solid transparent;
+  }
+  .posact.save { background: #111827; color: #fff; }
+  .posact.clear { background: #fff; color: #b91c1c; border-color: #fca5a5; }
+  .poshint { font-size: 11.5px; color: #92400e; }
   .conn { font-size: 12px; margin-left: auto; white-space: nowrap; }
   .conn.on { color: #16a34a; }
   .conn.off { color: #d97706; }
@@ -73,8 +105,20 @@
   <span id="atr" class="pill">ATR —</span>
   <span id="funding" class="pill">펀딩 —</span>
   <span id="boxStatus" class="pill">불러오는 중…</span>
+  <button id="posBtn" class="posbtn" aria-expanded="false">＋ 내 포지션</button>
+  <span id="posPill" class="pill" hidden></span>
   <span id="conn" class="conn off">○ 연결 중…</span>
 </header>
+<div id="posPanel" class="pospanel" hidden>
+  <span class="dirgroup" role="group" aria-label="포지션 방향">
+    <button data-dir="long" class="dirbtn active" aria-pressed="true">롱</button>
+    <button data-dir="short" class="dirbtn" aria-pressed="false">숏</button>
+  </span>
+  <input id="posEntry" type="number" inputmode="decimal" min="0" step="0.1" placeholder="진입가 (USDT)" aria-label="진입가">
+  <button id="posSave" class="posact save">차트에 표시</button>
+  <button id="posClear" class="posact clear">지우기</button>
+  <span class="poshint">손절·익절선은 봇과 같은 기준(1h ATR×3)으로 자동 계산 · 이 브라우저에만 저장됩니다</span>
+</div>
 <div id="wrap">
   <div id="ohlc"></div>
   <div id="chart"></div>
@@ -85,7 +129,8 @@
     📦박스권일 때 🟣보라 파선=박스 상·하단, 🟢상향·🔴하향 돌파선(점선) · 박스권 아닐 때 ⚫검정 파선=직전 스윙 고·저 ·
     🟢▲매수·🔴▼매도 화살표=봇과 동일한 박스돌파 신호(과거 복기용).
     15분봉 화면의 화살표도 같은 1시간봉 신호를 해당 시각에 표시한 것(15분 자체 신호는 백테스트 우위 없음).
-    박스권·신호 기준은 봇 알림과 동일한 검증 파라미터.<br>
+    박스권·신호 기준은 봇 알림과 동일한 검증 파라미터 ·
+    '내 포지션' 입력 시 성긴 점선=⚫진입가·🔵손절·🔴익절(1h ATR×3 참고값, 이 브라우저에만 저장).<br>
   </span>
   캔들: 빨강=상승 · 파랑=하락 (한국식) · 시간축 = 한국시간(KST) · 정보 제공용이며 투자 권유가 아닙니다.
 </footer>
