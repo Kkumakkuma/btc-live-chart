@@ -63,6 +63,11 @@
   .posact.save { background: #111827; color: #fff; }
   .posact.clear { background: #fff; color: #b91c1c; border-color: #fca5a5; }
   .poshint { font-size: 11.5px; color: #92400e; }
+  .posx {
+    border: none; background: none; cursor: pointer; padding: 0 0 0 6px;
+    font: inherit; font-size: 11px; color: inherit; opacity: 0.65; vertical-align: baseline;
+  }
+  .posx:hover { opacity: 1; }
   .conn { font-size: 12px; margin-left: auto; white-space: nowrap; }
   .conn.on { color: #16a34a; }
   .conn.off { color: #d97706; }
@@ -106,7 +111,7 @@
   <span id="funding" class="pill">펀딩 —</span>
   <span id="boxStatus" class="pill">불러오는 중…</span>
   <button id="posBtn" class="posbtn" aria-expanded="false">＋ 내 포지션</button>
-  <span id="posPill" class="pill" hidden></span>
+  <span id="posPill" class="pill" hidden><span id="posPillTxt"></span><button id="posX" class="posx" aria-label="포지션 지우기">✕</button></span>
   <span id="conn" class="conn off">○ 연결 중…</span>
 </header>
 <div id="posPanel" class="pospanel" hidden>

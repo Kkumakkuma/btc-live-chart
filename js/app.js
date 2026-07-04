@@ -30,6 +30,8 @@ const els = {
   atr: document.getElementById("atr"),
   posBtn: document.getElementById("posBtn"),
   posPill: document.getElementById("posPill"),
+  posPillTxt: document.getElementById("posPillTxt"),
+  posX: document.getElementById("posX"),
   posPanel: document.getElementById("posPanel"),
   posEntry: document.getElementById("posEntry"),
   posSave: document.getElementById("posSave"),
@@ -288,8 +290,17 @@ function renderPosPill() {
   } else {
     els.posPill.className = "pill";
   }
-  els.posPill.textContent = `내 포지션 ${dirTxt} $${myPos.entry.toLocaleString("en-US", { maximumFractionDigits: 1 })}${pnlTxt}`;
+  els.posPillTxt.textContent = `내 포지션 ${dirTxt} $${myPos.entry.toLocaleString("en-US", { maximumFractionDigits: 1 })}${pnlTxt}`;
   els.posPill.hidden = false;
+}
+
+function clearPos() {
+  myPos = null;
+  savePosState();
+  updateOverlayLines(bars);
+  renderPosPill();
+  els.posPanel.hidden = true;
+  els.posBtn.setAttribute("aria-expanded", "false");
 }
 
 function savePosState() {
@@ -327,14 +338,8 @@ function initPosUi() {
     els.posPanel.hidden = true;
     els.posBtn.setAttribute("aria-expanded", "false");
   });
-  els.posClear.addEventListener("click", () => {
-    myPos = null;
-    savePosState();
-    updateOverlayLines(bars);
-    renderPosPill();
-    els.posPanel.hidden = true;
-    els.posBtn.setAttribute("aria-expanded", "false");
-  });
+  els.posClear.addEventListener("click", clearPos);
+  els.posX.addEventListener("click", clearPos);   // 필의 ✕로 바로 지우기 (쿠마님 요청)
 }
 
 function setPrice(p, prev) {
