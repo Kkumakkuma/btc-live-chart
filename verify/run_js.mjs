@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import {
   ema, rsi, vwapRolling, wilderAtrAt, computeBoxOverlay, computeSwing, findBoxSignals,
+  tfTrend,
 } from "../js/indicators.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -26,5 +27,6 @@ const out = {
   box: computeBoxOverlay(bars, "1h"),
   swing: computeSwing(bars, 20),
   signals: findBoxSignals(bars, "1h").map((s) => [s.idx, s.dir]),
+  trend: tfTrend(rows.map((k) => ({ open: +k[1], close: +k[4] }))),
 };
 console.log(JSON.stringify(out));

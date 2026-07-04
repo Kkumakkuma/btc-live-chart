@@ -53,6 +53,46 @@ export function rsi(closes, period = 14) {
   return out;
 }
 
+export function macdHist(closes, fast = 12, slow = 26, signal = 9) {
+  // ta.trend.macd_diff와 동일: ewm(span, adjust=False). 마지막 값 반환 (충분한 워밍업 전제).
+  const eFast = ema(closes, fast);
+  const eSlow = ema(closes, slow);
+  const macd = closes.map((_, i) => eFast[i] - eSlow[i]);
+  const sig = ema(macd, signal);
+  return macd[macd.length - 1] - sig[sig.length - 1];
+}
+
+// 봇 추세 판정 포팅 — notify_extras._tf_trend / listener _calc_trend와 동일 4표 투표.
+// bars = 진행봉 포함 원본. 내부에서 마감봉만 평가. 반환 {trend, votes, rsi} | null(데이터 부족).
+export function tfTrend(bars) {
+  if (!bars || bars.length < 33) return null;
+  const closed = bars.slice(0, -1);
+  const closes = closed.map((b) => b.close);
+  const n = closes.length;
+  const ema5 = ema(closes, 5)[n - 1];
+  const ema20 = ema(closes, 20)[n - 1];
+  const rs = rsi(closes, 14)[n - 1];
+  if (rs === null || rs === undefined) return null;
+  const mh = macdHist(closes);
+  const lastLong = closed[n - 1].close > closed[n - 1].open;
+  const votes = (ema5 > ema20 ? 1 : 0) + (mh > 0 ? 1 : 0) + (rs > 50 ? 1 : 0) + (lastLong ? 1 : 0);
+  const trend = votes >= 3 ? "LONG" : (votes <= 1 ? "SHORT" : "MIXED");
+  return { trend, votes, rsi: rs, macdHist: mh };
+}
+
+// 3개 TF 추세 합의 — notify_extras.build_trend_text의 합의 로직과 동일.
+export function trendConsensus(trends) {
+  const valid = trends.filter(Boolean).map((t) => t.trend);
+  if (valid.length < 2) return { key: "na", label: "판정 불가" };
+  const nL = valid.filter((t) => t === "LONG").length;
+  const nS = valid.filter((t) => t === "SHORT").length;
+  if (nL === 3) return { key: "strong-long", label: "강한 롱" };
+  if (nS === 3) return { key: "strong-short", label: "강한 숏" };
+  if (nL >= 2 && nS === 0) return { key: "long", label: "롱 우세" };
+  if (nS >= 2 && nL === 0) return { key: "short", label: "숏 우세" };
+  return { key: "mixed", label: "혼조" };
+}
+
 export function vwapRolling(highs, lows, closes, vols, window = 24) {
   const n = closes.length;
   const out = new Array(n).fill(null);

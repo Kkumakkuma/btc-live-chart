@@ -3,8 +3,8 @@
 // + RSI(마감봉) + 펀딩비 + 박스권(1h winner)/스윙 고저선. 시간축 = KST.
 import {
   ema, rsi, vwapRolling, computeBoxOverlay, computeSwing,
-  calcAtrArray, findBoxSignals, BOX_SL_TP_K,
-} from "./indicators.js";
+  calcAtrArray, findBoxSignals, BOX_SL_TP_K, tfTrend, trendConsensus,
+} from "./indicators.js?v=2"; // indicators.js 수정 시 v 올릴 것 — app.js(신)+indicators(구 캐시) 섞임 방지
 
 const SYMBOL = "BTCUSDT";
 const REST = "https://fapi.binance.com";
@@ -28,6 +28,7 @@ const els = {
   price: document.getElementById("price"),
   rsi: document.getElementById("rsi"),
   atr: document.getElementById("atr"),
+  bias: document.getElementById("bias"),
   posBtn: document.getElementById("posBtn"),
   posPill: document.getElementById("posPill"),
   posPillTxt: document.getElementById("posPillTxt"),
@@ -275,7 +276,33 @@ function updateOverlayLines(overlayBars) {
   }
 }
 
-// ── 내 포지션 (수동 입력 — localStorage, 서버 전송 없음) ──────
+// ── 롱/숏 우세 (봇 추세 판정과 동일 — 5m/15m/1h 합의, 60초 갱신) ──
+const TREND_TF = [["5m", 288], ["15m", 288], ["1h", 240]]; // 봇 _TF_DAYS와 동일 봉 수
+
+async function updateBias() {
+  try {
+    const results = await Promise.all(TREND_TF.map(async ([itv, limit]) => {
+      try {
+        const r = await fetch(`${REST}/fapi/v1/klines?symbol=${SYMBOL}&interval=${itv}&limit=${limit}`);
+        if (!r.ok) return null;
+        const kl = await r.json();
+        return tfTrend(kl.map((k) => ({ open: +k[1], close: +k[4] })));
+      } catch {
+        return null;  // 한 TF 실패해도 나머지 둘로 합의(2개 미만이면 '판정 불가') — codex
+      }
+    }));
+    const con = trendConsensus(results);
+    const emo = { "strong-long": "🟢🟢🟢", long: "🟢🟢", mixed: "⚪", short: "🔴🔴",
+                  "strong-short": "🔴🔴🔴", na: "⚪" }[con.key];
+    els.bias.textContent = `추세 ${emo} ${con.label}`;
+    els.bias.className = "pill " + (con.key.includes("long") ? "warm"
+      : con.key.includes("short") ? "cool" : "");
+    const ko = { LONG: "롱", SHORT: "숏", MIXED: "혼조" };
+    els.bias.title = TREND_TF.map(([itv], i) => results[i]
+      ? `${itv} ${ko[results[i].trend]}(${results[i].votes}/4표)` : `${itv} 데이터 없음`)
+      .join(" · ") + " — 봇과 동일한 4표 투표(EMA5/20·MACD·RSI·양봉), 마감봉 기준";
+  } catch { /* 표시만 유지 */ }
+}
 function renderPosPill() {
   if (!myPos || !(myPos.entry > 0)) {
     els.posPill.hidden = true;
@@ -529,5 +556,7 @@ initPosUi();
 renderPosPill();
 switchTf("1h");
 fetchFunding();
+updateBias();
 setInterval(fetchFunding, 5 * 60 * 1000);
+setInterval(updateBias, 60 * 1000);
 setInterval(renderFunding, 30 * 1000);  // 카운트다운 표시 갱신(재조회 없음)

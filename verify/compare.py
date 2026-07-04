@@ -110,6 +110,23 @@ if js["signals"] != pysigs:
 else:
     print(f"  signals(find_signals winner): OK ({len(pysigs)}건 완전 일치 — {pysigs})")
 
+# 추세 판정 (notify_extras._tf_trend 4표 투표 — 마감봉 기준)
+_c = df["close"].iloc[:-1]
+_o = df["open"].iloc[:-1]
+_e5 = float(ta.trend.ema_indicator(_c, 5).iloc[-1])
+_e20 = float(ta.trend.ema_indicator(_c, 20).iloc[-1])
+_rsi = float(ta.momentum.rsi(_c, 14).iloc[-1])
+_mh = float(ta.trend.macd_diff(_c).iloc[-1])
+_votes = int(_e5 > _e20) + int(_mh > 0) + int(_rsi > 50) + int(_c.iloc[-1] > _o.iloc[-1])
+_trend = "LONG" if _votes >= 3 else ("SHORT" if _votes <= 1 else "MIXED")
+jt = js["trend"]
+check("trend.rsi", jt["rsi"], _rsi)
+check("trend.macdHist", jt["macdHist"], _mh, tol=1e-4)
+if jt["trend"] != _trend or jt["votes"] != _votes:
+    fails.append(f"trend 불일치: js={jt} py={_trend}/{_votes}")
+else:
+    print(f"  trend: OK ({_trend} {_votes}/4표)")
+
 if fails:
     print("\n❌ 불일치:")
     for x in fails:
